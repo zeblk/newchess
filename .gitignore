@@ -1,0 +1,21 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.tox/
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Project outputs
+artifacts/
+outputs/
+logs/
+
+# Data
+/data/*.jsonl
+/data/*.pkl

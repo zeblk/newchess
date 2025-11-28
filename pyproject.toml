@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chess-policy-network"
+version = "0.1.0"
+description = "Supervised policy network for chess trained on Stockfish-labeled positions"
+readme = "README.md"
+authors = [
+  { name = "Your Name", email = "" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+  "python-chess>=1.999",
+  "torch>=2.0",
+  "numpy>=1.25",
+  "tqdm>=4.65",
+  "pyyaml>=6.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=23.0",
+  "mypy>=1.4",
+  "pytest>=7.3"
+]
+
+[project.urls]
+homepage = "https://example.com"
+repository = "https://example.com/repository"
