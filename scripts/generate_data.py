@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("data/stockfish_positions.jsonl"))
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--max-moves", type=int, default=512)
-    parser.add_argument("--time", type=float, default=0.25)
+    parser.add_argument("--time", type=float, default=0.1)
     parser.add_argument("--random-prob", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--append", action="store_true", default=True, help="Append to output file when set (default: True)")

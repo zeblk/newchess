@@ -15,7 +15,3 @@ venv/
 artifacts/
 outputs/
 logs/
-
-# Data
-/data/*.jsonl
-/data/*.pkl
