@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""CLI wrapper to run the Stockfish self-play data generator."""
+"""
+CLI wrapper to run the Stockfish self-play data generator.
+Usage example: 
+    python3 scripts/generate_data.py --engine /home/zebkurthnelson/newchess/stockfish-ubuntu-x86-64-avx2 --threads 3
+
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -19,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--random-prob", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--append", action="store_true", default=True, help="Append to output file when set (default: True)")
+    parser.add_argument("--threads", type=int, default=1, help="Number of CPU threads to request from Stockfish")
     return parser.parse_args()
 
 
@@ -32,6 +39,7 @@ def main() -> None:
         max_moves_per_game=args.max_moves,
         time_limit=args.time,
         random_move_prob=args.random_prob,
+        threads=args.threads,
         seed=args.seed,
         append=args.append,
     )

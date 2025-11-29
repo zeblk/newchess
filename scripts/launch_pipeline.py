@@ -21,6 +21,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import IO, Optional, Tuple
 
@@ -102,13 +103,13 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
 def build_generator_command(args: argparse.Namespace) -> list[str]:
+    engine_path = str(Path(args.engine).resolve())     # <-- resolve to absolute path
     cmd = [
         sys.executable,
         "scripts/generate_data.py",
         "--engine",
-        str(args.engine),
+        engine_path,
         "--output",
         str(args.output),
         "--games",
@@ -126,7 +127,6 @@ def build_generator_command(args: argparse.Namespace) -> list[str]:
         cmd.append("--overwrite")
     return cmd
 
-
 def launch_generator(cmd: list[str], log_path: Optional[Path]) -> Tuple[subprocess.Popen, Optional[IO[str]]]:
     LOGGER.info("Starting data generator: %s", " ".join(cmd))
     stdout_sink: Optional[IO[str]] = None
@@ -136,6 +136,13 @@ def launch_generator(cmd: list[str], log_path: Optional[Path]) -> Tuple[subproce
         stdout_sink = log_path.open("a", encoding="utf-8")
         popen_kwargs["stdout"] = stdout_sink
         popen_kwargs["stderr"] = subprocess.STDOUT
+
+    # Ensure src/ is on PYTHONPATH for the generator subprocess as well
+    env = os.environ.copy()
+    src_path = str(Path("src").resolve())
+    prev = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src_path + (os.pathsep + prev if prev else "")
+    popen_kwargs["env"] = env
 
     try:
         process = subprocess.Popen(cmd, **popen_kwargs)
@@ -156,6 +163,27 @@ def run_training(train_config: Path) -> int:
     env["PYTHONPATH"] = src_path + (os.pathsep + prev if prev else "")
     result = subprocess.run(cmd, check=False, env=env)
     return result.returncode
+
+
+def wait_for_dataset(path: Path, timeout: int = 60) -> None:
+    """Wait until the dataset file exists and contains at least one non-empty line.
+
+    Raises TimeoutError if the file is not ready within `timeout` seconds.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if path.exists() and path.stat().st_size > 0:
+                with path.open("r", encoding="utf-8") as fh:
+                    for line in fh:
+                        if line.strip():
+                            LOGGER.info("Dataset available at %s", path)
+                            return
+        except Exception:
+            # ignore transient IO errors and retry
+            pass
+        time.sleep(0.5)
+    raise TimeoutError(f"Timed out waiting for dataset at {path}")
 
 
 def check_dependencies() -> bool:
@@ -208,6 +236,21 @@ def main() -> None:
         generator_process, log_handle = launch_generator(generator_cmd, args.generator_log)
     except FileNotFoundError as exc:
         LOGGER.error("Failed to start data generator: %s", exc)
+        sys.exit(1)
+
+    # Wait for the generator to produce at least one dataset record before starting training
+    try:
+        wait_for_dataset(args.output, timeout=60)
+    except TimeoutError as exc:
+        LOGGER.error("%s", exc)
+        # Stop generator if it was started
+        if generator_process is not None and generator_process.poll() is None:
+            LOGGER.info("Stopping data generator due to missing dataset ...")
+            generator_process.terminate()
+            try:
+                generator_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                generator_process.kill()
         sys.exit(1)
 
     return_code = 1
