@@ -18,6 +18,8 @@ class ModelConfig:
     input_planes: int = NUM_FEATURE_PLANES
     channels: int = 128
     residual_blocks: int = 6
+    policy_channels: Optional[int] = None
+    value_hidden_size: int = 256
     dropout: float = 0.1
 
 

@@ -32,6 +32,8 @@ def build_model(config: ExperimentConfig, device: torch.device) -> PolicyNetwork
         input_planes=config.model.input_planes,
         channels=config.model.channels,
         residual_blocks=config.model.residual_blocks,
+        policy_channels=config.model.policy_channels,
+        value_hidden_size=config.model.value_hidden_size,
         dropout=config.model.dropout,
     )
     model.to(device)

@@ -35,10 +35,12 @@ class PolicyNetwork(nn.Module):
         input_planes: int,
         channels: int,
         residual_blocks: int,
+        policy_channels: Optional[int] = None,
+        value_hidden_size: int = 256,
         dropout: float = 0.1,
     ) -> None:
         super().__init__()
-        inter_channels = max(32, channels // 2)
+        inter_channels = policy_channels if policy_channels is not None else max(1, channels // 2)
         self.stem = nn.Sequential(
             nn.Conv2d(input_planes, channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(channels),
@@ -58,6 +60,17 @@ class PolicyNetwork(nn.Module):
             nn.Linear(inter_channels * 8 * 8, NUM_MOVES),
         )
 
+        self.value_head = nn.Sequential(
+            nn.Conv2d(channels, 1, kernel_size=1, bias=False),
+            nn.BatchNorm2d(1),
+            nn.ReLU(inplace=True),
+            nn.Flatten(),
+            nn.Linear(8 * 8, value_hidden_size),
+            nn.ReLU(inplace=True),
+            nn.Linear(value_hidden_size, 1),
+            nn.Tanh(),
+        )
+
         self._initialize_parameters()
 
     def _initialize_parameters(self) -> None:
@@ -74,9 +87,15 @@ class PolicyNetwork(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:  # type: ignore[override]
         x = self.stem(x)
         x = self.backbone(x)
-        x = self.policy_head(x)
-        logits = self.classifier(x)
-        return logits
+        
+        # Policy Head
+        p = self.policy_head(x)
+        logits = self.classifier(p)
+        
+        # Value Head
+        v = self.value_head(x)
+        
+        return logits, v

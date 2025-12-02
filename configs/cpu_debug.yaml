@@ -1,0 +1,38 @@
+seed: 42
+
+device: cpu
+
+model:
+  input_planes: 18
+  channels: 64
+  residual_blocks: 2
+  dropout: 0.0
+
+optimizer:
+  name: adamw
+  lr: 0.001
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+
+scheduler:
+  name: none
+  t_max: 20
+  min_lr: 1.0e-6
+
+training:
+  batch_size: 16
+  epochs: 1
+  val_split: 0.0
+  num_workers: 0
+  max_positions: null
+  amp: false
+  grad_clip_norm: 1.0
+  output_dir: artifacts/debug
+  checkpoint_every: 1
+  log_every: 10
+
+logging:
+  use_tqdm: false
+
+paths:
+  dataset: data/debug_rl
