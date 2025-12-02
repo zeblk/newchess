@@ -11,6 +11,11 @@ from typing import Iterator
 import chess
 import chess.engine
 
+import multiprocessing
+import os
+import shutil
+import tempfile
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -25,6 +30,7 @@ class SelfPlayConfig:
     threads: int = 1  # number of CPU threads to request from the engine
     seed: int | None = None
     append: bool = True
+    workers: int = 1  # number of parallel worker processes
 
 
 def _iter_selfplay_positions(
@@ -79,13 +85,79 @@ def _iter_selfplay_positions(
         )
 
 
-def generate_selfplay_data(config: SelfPlayConfig) -> int:
-    """Run Stockfish self-play and append (fen, best_move) entries to output_path.
+def _worker_generate(config: SelfPlayConfig, worker_id: int, num_games: int) -> int:
+    """Worker function to generate a subset of games."""
+    # Create a unique shard file for this worker
+    # Format: part_{worker_id}_{random_hex}.jsonl
+    import uuid
+    shard_name = f"part_{worker_id}_{uuid.uuid4().hex[:8]}.jsonl"
+    shard_path = Path(config.output_path) / shard_name
+    
+    # Adjust config for this worker
+    worker_config = SelfPlayConfig(
+        engine_path=config.engine_path,
+        output_path=shard_path,
+        games=num_games,
+        max_moves_per_game=config.max_moves_per_game,
+        time_limit=config.time_limit,
+        random_move_prob=config.random_move_prob,
+        threads=1,  # Force 1 thread per worker
+        seed=config.seed + worker_id if config.seed is not None else None,
+        append=False, # New file for this shard
+        workers=1,
+    )
 
-    Returns the number of positions written.
+    try:
+        written = generate_selfplay_data(worker_config)
+        return written
+    except Exception as e:
+        LOGGER.exception(f"Worker {worker_id} failed: {e}")
+        return 0
+
+
+def generate_selfplay_data(config: SelfPlayConfig) -> int:
+    """Run Stockfish self-play and write positions to output_path.
+    
+    If workers > 1, output_path must be a directory.
+    If workers = 1, output_path can be a file or directory (if dir, a shard is created).
     """
     out_path = Path(config.output_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # If workers > 1, dispatch to workers
+    if config.workers > 1 and config.games > 0:
+        if out_path.exists() and not out_path.is_dir():
+             raise NotADirectoryError(f"Output path {out_path} must be a directory for parallel generation.")
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        LOGGER.info(f"Starting {config.workers} workers for {config.games} games...")
+        games_per_worker = config.games // config.workers
+        remainder = config.games % config.workers
+        
+        tasks = []
+        for i in range(config.workers):
+            n_games = games_per_worker + (1 if i < remainder else 0)
+            if n_games > 0:
+                tasks.append((config, i, n_games))
+
+        total_written = 0
+        with multiprocessing.Pool(processes=config.workers) as pool:
+            results = pool.starmap(_worker_generate, tasks)
+            total_written = sum(results)
+
+        LOGGER.info("Parallel generation finished. Wrote %d positions to %s", total_written, out_path)
+        return total_written
+
+    # Single process execution
+    # If output_path is a directory, create a default shard file
+    if out_path.is_dir() or (not out_path.suffix and not out_path.exists()):
+        out_path.mkdir(parents=True, exist_ok=True)
+        import uuid
+        shard_name = f"part_0_{uuid.uuid4().hex[:8]}.jsonl"
+        target_file = out_path / shard_name
+    else:
+        target_file = out_path
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+
     mode = "a" if config.append else "w"
 
     # Ensure engine binary exists
@@ -104,13 +176,13 @@ def generate_selfplay_data(config: SelfPlayConfig) -> int:
             # Some Stockfish builds may not accept configuration; ignore failures
             pass
 
-        with out_path.open(mode, encoding="utf-8") as handle:
+        with target_file.open(mode, encoding="utf-8") as handle:
             for fen, best_uci in _iter_selfplay_positions(engine, config):
                 payload = {"fen": fen, "best_move": best_uci}
                 handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
                 handle.flush()
                 written += 1
-    LOGGER.info("Wrote %d positions to %s", written, out_path)
+    LOGGER.info("Wrote %d positions to %s", written, target_file)
     return written
 
 

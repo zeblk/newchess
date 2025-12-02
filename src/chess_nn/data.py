@@ -21,7 +21,11 @@ class PositionRecord:
 
 
 class PositionDataset(Dataset):
-    """Dataset wrapping FEN positions paired with Stockfish moves."""
+    """Dataset for reading sharded JSONL files with O(1) random access.
+    
+    Builds an in-memory index of (file_path, byte_offset) for every line
+    in all .jsonl files within the given directory.
+    """
 
     def __init__(
         self,
@@ -31,42 +35,59 @@ class PositionDataset(Dataset):
     ) -> None:
         self.path = Path(data_path)
         self.include_legal_mask = include_legal_mask
-        if not self.path.exists():
-            raise FileNotFoundError(f"Dataset file not found: {self.path}")
-        self.records = self._load_records(self.path, max_positions)
+        self.index: List[tuple[Path, int]] = []
+        
+        if self.path.is_dir():
+            self._build_index_from_dir(self.path, max_positions)
+        elif self.path.is_file():
+            self._build_index_from_file(self.path, max_positions)
+        else:
+            raise FileNotFoundError(f"Dataset path not found: {self.path}")
 
-    @staticmethod
-    def _load_records(path: Path, max_positions: Optional[int]) -> List[PositionRecord]:
-        records: List[PositionRecord] = []
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                payload: Dict[str, str] = json.loads(line)
-                fen = payload.get("fen")
-                move = payload.get("best_move")
-                if fen is None or move is None:
-                    raise ValueError("Each dataset entry must contain 'fen' and 'best_move'")
-                records.append(PositionRecord(fen=fen, best_move=move))
-                if max_positions is not None and len(records) >= max_positions:
+    def _build_index_from_dir(self, directory: Path, max_positions: Optional[int]) -> None:
+        files = sorted(directory.glob("*.jsonl"))
+        if not files:
+            raise ValueError(f"No .jsonl files found in {directory}")
+        
+        for file_path in files:
+            if max_positions is not None and len(self.index) >= max_positions:
+                break
+            self._build_index_from_file(file_path, max_positions)
+
+    def _build_index_from_file(self, file_path: Path, max_positions: Optional[int]) -> None:
+        with file_path.open("rb") as f:
+            while True:
+                if max_positions is not None and len(self.index) >= max_positions:
                     break
-        if not records:
-            raise ValueError(f"No records loaded from dataset at {path}")
-        return records
+                offset = f.tell()
+                line = f.readline()
+                if not line:
+                    break
+                # Optional: verify line is valid JSON here or just assume it is
+                if line.strip():
+                    self.index.append((file_path, offset))
 
     def __len__(self) -> int:
-        return len(self.records)
+        return len(self.index)
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor | str]:
-        record = self.records[index]
-        board = chess.Board(record.fen)
+        file_path, offset = self.index[index]
+        with file_path.open("r", encoding="utf-8") as f:
+            f.seek(offset)
+            line = f.readline()
+            payload = json.loads(line)
+
+        fen = payload["fen"]
+        best_move = payload["best_move"]
+        
+        board = chess.Board(fen)
         features_tensor = feature_utils.board_to_tensor(board)
-        target_index = move_to_index(record.best_move)
+        target_index = move_to_index(best_move)
+        
         sample: Dict[str, torch.Tensor | str] = {
             "features": features_tensor,
             "target": torch.tensor(target_index, dtype=torch.long),
-            "fen": record.fen,
+            "fen": fen,
         }
         if self.include_legal_mask:
             sample["legal_mask"] = legal_move_mask(board)
